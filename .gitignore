@@ -1,0 +1,8 @@
+# Build output (published as GitHub Release assets instead)
+dist/
+
+# Editor / OS
+.vs/
+*.user
+Thumbs.db
+.DS_Store
