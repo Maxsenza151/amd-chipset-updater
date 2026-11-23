@@ -51,3 +51,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 - `src\BackgroundCheck.cs` – `--check` mode and notification
 - `src\Autostart.cs` – startup entry
 - `installer\setup.iss` – Inno Setup script
+
+## License
+
+[MIT](LICENSE). Unofficial tool, not affiliated with AMD. AMD drivers are downloaded from amd.com
+and remain subject to AMD's own license terms.
