@@ -1,7 +1,7 @@
-# Builds AMD Chipset Updater:
-#   dist\AMDChipsetUpdater.exe                    the program
+# Builds AMD Chipset Updater. Release files:
 #   dist\AMDChipsetUpdater-Portable-<ver>.zip     portable version
 #   dist\AMDChipsetUpdater-Setup-<ver>.exe        installer (needs Inno Setup 6)
+# (dist\AMDChipsetUpdater.exe is an intermediate file packed into both.)
 #
 # Only uses the C# compiler that ships with Windows (.NET Framework 4.x), no SDK required.
 #   powershell -ExecutionPolicy Bypass -File build.ps1

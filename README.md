@@ -2,13 +2,21 @@
 
 Small Windows app that installs and updates AMD chipset drivers straight from amd.com.
 
-## Output (`dist\`)
-
-| File | What it is |
+| Up to date | Update available |
 |---|---|
-| `AMDChipsetUpdater.exe` | The program (single exe, ~55 KB) |
-| `AMDChipsetUpdater-Portable-1.0.0.zip` | Portable version: exe + README |
-| `AMDChipsetUpdater-Setup-1.0.0.exe` | Installer (per-user, no admin rights needed) |
+| ![Updated](docs/screenshots/updated.png) | ![Update available](docs/screenshots/update-available.png) |
+
+## Download
+
+Get it from the [latest release](https://github.com/Maxsenza151/amd-chipset-updater/releases/latest):
+
+| File | Use it if |
+|---|---|
+| `AMDChipsetUpdater-Setup-<version>.exe` | You want it installed: Start menu entry, uninstaller, optional startup check. No admin rights needed. |
+| `AMDChipsetUpdater-Portable-<version>.zip` | You want to run it without installing: extract it anywhere and run the program inside. |
+
+Requires Windows 10/11 (uses the built-in .NET Framework 4.8). The app is not code-signed, so
+SmartScreen may warn on first launch ("More info" → "Run anyway").
 
 ## How it works
 
@@ -39,6 +47,8 @@ Needs only Windows' built-in C# compiler (.NET Framework 4.8). Inno Setup 6 is r
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
+
+The portable zip and the installer are written to `dist\`.
 
 ## Source
 
