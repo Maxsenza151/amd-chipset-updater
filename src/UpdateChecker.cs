@@ -22,6 +22,8 @@ namespace ChipsetUpdater
             try
             {
                 r.Hardware = HardwareDetector.Detect();
+                if (Settings.ManualSocket != null)
+                    r.Hardware.ApplyManual(Settings.ManualSocket, Settings.ManualChipset);
             }
             catch (Exception ex)
             {

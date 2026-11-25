@@ -11,9 +11,18 @@ namespace ChipsetUpdater
 
         // Lets the installer detect a running copy (Inno Setup AppMutex).
         const string RunningMutexName = "AMDChipsetUpdater.Running";
+        static Mutex runningMutex;
+
+        /// <summary>Called right before starting a self-update installer, so it does not see this app as running.</summary>
+        public static void ReleaseRunningMutex()
+        {
+            if (runningMutex == null) return;
+            runningMutex.Dispose();
+            runningMutex = null;
+        }
 
         /// <summary>
-        /// No arguments: opens the main window.
+        /// No arguments: opens the main window (and offers app updates from GitHub).
         /// --check: silent startup check. Shows a notification only when an update is
         ///          available, then exits. Exit code: 0 up to date, 1 notified, 2 error.
         /// --check --force-notify: same, but always notifies (for testing).
@@ -23,15 +32,21 @@ namespace ChipsetUpdater
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-            using (new Mutex(false, RunningMutexName))
+            runningMutex = new Mutex(false, RunningMutexName);
+            try
             {
                 if (HasArg(args, "--check"))
                     return BackgroundCheck.Run(HasArg(args, "--force-notify"));
 
+                AppUpdater.CleanupAfterUpdate(Application.ExecutablePath);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new MainForm());
                 return 0;
+            }
+            finally
+            {
+                ReleaseRunningMutex();
             }
         }
 

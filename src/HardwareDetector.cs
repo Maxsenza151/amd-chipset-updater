@@ -18,14 +18,26 @@ namespace ChipsetUpdater
         public bool IsSupported;
         public string UnsupportedReason;
 
-        public string Socket;          // "AM4", "AM5", "sTR5", ... or "Mobile"
-        public string Chipset;         // "B550", ... (page actually used)
-        public bool ChipsetFromBoard;  // chipset read from the motherboard name
-        public string Note;            // extra hint shown in the UI
+        // What automatic detection found. DetectedChipset is null when the board name did not reveal it.
+        public string DetectedSocket;
+        public string DetectedChipset;
+
+        // What is actually used: the detected values, or the user's manual choice.
+        public string Socket;      // "AM4", "AM5", "sTR5", ... or "Notebook"
+        public string Chipset;     // null = unknown (the socket's default AMD page is used)
+        public bool IsManual;
+
+        public string Note;        // extra hint shown in the UI
+
+        /// <summary>True when the chipset is known or there is nothing to choose (notebooks).</summary>
+        public bool ChipsetKnown
+        {
+            get { return Chipset != null || AmdPlatforms.ChipsetsFor(Socket).Length == 0; }
+        }
 
         public string DriverPageUrl
         {
-            get { return Socket == null ? null : AmdPlatforms.PageUrl(Socket, Chipset); }
+            get { return Socket == null ? null : AmdPlatforms.PageUrl(Socket, Chipset ?? AmdPlatforms.DefaultChipset(Socket)); }
         }
 
         public string FallbackPageUrl
@@ -42,38 +54,52 @@ namespace ChipsetUpdater
             }
         }
 
-        public string PlatformText
+        /// <summary>Uses the user's choice instead of the detected platform, if it is valid.</summary>
+        public void ApplyManual(string socket, string chipset)
         {
-            get
-            {
-                if (!IsSupported) return "Not supported";
-                if (Socket == "Mobile") return "Notebook / mobile APU (integrated chipset)";
-                if (ChipsetFromBoard) return "Socket " + Socket + "  ·  " + Chipset + " chipset";
-                return "Socket " + Socket + "  ·  chipset not identified (using " + Chipset + " page)";
-            }
+            if (!IsSupported || !AmdPlatforms.IsValid(socket, chipset)) return;
+            Socket = socket;
+            Chipset = chipset;
+            IsManual = true;
         }
     }
 
-    /// <summary>Maps AMD platforms to their chipset driver pages on amd.com.</summary>
+    /// <summary>AMD platforms and their chipset driver pages on amd.com.</summary>
     static class AmdPlatforms
     {
         const string BaseUrl = "https://www.amd.com/en/support/downloads/drivers.html/chipsets/";
 
-        static readonly Dictionary<string, string> ChipsetToSocket =
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "X870E", "AM5" }, { "X870", "AM5" }, { "B850", "AM5" }, { "B840", "AM5" },
-                { "X670E", "AM5" }, { "X670", "AM5" }, { "B650E", "AM5" }, { "B650", "AM5" }, { "A620", "AM5" },
-                { "X570", "AM4" }, { "B550", "AM4" }, { "A520", "AM4" }, { "X470", "AM4" },
-                { "B450", "AM4" }, { "X370", "AM4" }, { "B350", "AM4" }, { "A320", "AM4" },
-                { "TRX50", "sTR5" }, { "WRX90", "sTR5" }, { "WRX80", "sWRX8" },
-                { "TRX40", "sTRX4" }, { "X399", "TR4" },
-            };
+        public const string Notebook = "Notebook";
+
+        public static readonly string[] Sockets = { "AM5", "AM4", "sTR5", "sWRX8", "sTRX4", "TR4", Notebook };
+
+        static readonly Dictionary<string, string[]> ChipsetsBySocket = new Dictionary<string, string[]>
+        {
+            { "AM5", new[] { "X870E", "X870", "B850", "B840", "X670E", "X670", "B650E", "B650", "A620" } },
+            { "AM4", new[] { "X570", "B550", "A520", "X470", "B450", "X370", "B350", "A320" } },
+            { "sTR5", new[] { "TRX50", "WRX90" } },
+            { "sWRX8", new[] { "WRX80" } },
+            { "sTRX4", new[] { "TRX40" } },
+            { "TR4", new[] { "X399" } },
+            { Notebook, new string[0] },
+        };
 
         // Longer names first so "X870E" wins over "X870". Suffixes like "B550M", "X570S" still match.
         static readonly Regex ChipsetInName = new Regex(
             @"(?<![A-Z0-9])(X870E|X870|B850|B840|X670E|X670|B650E|B650|A620|X570|B550|A520|X470|B450|X370|B350|A320|TRX50|WRX90|WRX80|TRX40|X399)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        public static string[] ChipsetsFor(string socket)
+        {
+            string[] list;
+            return socket != null && ChipsetsBySocket.TryGetValue(socket, out list) ? list : new string[0];
+        }
+
+        public static bool IsValid(string socket, string chipset)
+        {
+            if (socket == null || !ChipsetsBySocket.ContainsKey(socket)) return false;
+            return chipset == null || Array.IndexOf(ChipsetsFor(socket), chipset) >= 0;
+        }
 
         public static string DefaultChipset(string socket)
         {
@@ -90,7 +116,7 @@ namespace ChipsetUpdater
 
         public static string PageUrl(string socket, string chipset)
         {
-            string socketPath = socket == "Mobile" ? "am5" : socket.ToLowerInvariant();
+            string socketPath = socket == Notebook ? "am5" : socket.ToLowerInvariant();
             return BaseUrl + socketPath + "/" + chipset.ToLowerInvariant() + ".html";
         }
 
@@ -102,7 +128,8 @@ namespace ChipsetUpdater
             Match m = ChipsetInName.Match(boardName);
             if (!m.Success) return null;
             string chipset = m.Groups[1].Value.ToUpperInvariant();
-            socket = ChipsetToSocket[chipset];
+            foreach (KeyValuePair<string, string[]> kv in ChipsetsBySocket)
+                if (Array.IndexOf(kv.Value, chipset) >= 0) socket = kv.Key;
             return chipset;
         }
     }
@@ -123,7 +150,7 @@ namespace ChipsetUpdater
             {
                 hw.CpuName = Clean(o["Name"]);
                 hw.CpuVendor = Clean(o["Manufacturer"]);
-                Match m = Regex.Match(Clean(o["Caption"]), @"Family\s+(\d+)\s+Model\s+(\d+)", RegexOptions.IgnoreCase);
+                Match m = Regex.Match(Clean(o["Caption"]) ?? "", @"Family\s+(\d+)\s+Model\s+(\d+)", RegexOptions.IgnoreCase);
                 if (m.Success)
                 {
                     hw.CpuFamily = int.Parse(m.Groups[1].Value);
@@ -141,6 +168,8 @@ namespace ChipsetUpdater
 
             hw.IsNotebook = IsPortableChassis() || MobileCpuName.IsMatch(hw.CpuName ?? "");
             Classify(hw);
+            hw.Socket = hw.DetectedSocket;
+            hw.Chipset = hw.DetectedChipset;
             return hw;
         }
 
@@ -168,26 +197,21 @@ namespace ChipsetUpdater
             }
             else if (hw.IsNotebook)
             {
-                hw.Socket = "Mobile";
-                hw.Chipset = AmdPlatforms.DefaultChipset("Mobile");
+                hw.DetectedSocket = AmdPlatforms.Notebook;
                 hw.Note = "Notebook detected: AMD's universal chipset package is used. "
                         + "Your notebook maker may recommend its own drivers.";
                 return;
             }
             else
             {
-                hw.Socket = DesktopSocket(hw.CpuFamily, hw.CpuModel, name);
-                hw.Chipset = AmdPlatforms.DefaultChipset(hw.Socket);
+                hw.DetectedSocket = DesktopSocket(hw.CpuFamily, hw.CpuModel, name);
             }
 
-            // Refine the chipset from the motherboard name when it fits the detected socket.
+            // Read the chipset from the motherboard name when it fits the detected socket.
             string boardSocket;
             string boardChipset = AmdPlatforms.FindChipset(hw.BoardProduct, out boardSocket);
-            if (boardChipset != null && boardSocket == hw.Socket)
-            {
-                hw.Chipset = boardChipset;
-                hw.ChipsetFromBoard = true;
-            }
+            if (boardChipset != null && boardSocket == hw.DetectedSocket)
+                hw.DetectedChipset = boardChipset;
         }
 
         static string DesktopSocket(int family, int model, string name)
@@ -202,6 +226,7 @@ namespace ChipsetUpdater
             return "AM4";
         }
 
+        /// <summary>Threadripper: the model number identifies both socket and chipset.</summary>
         static void ClassifyThreadripper(HardwareInfo hw, string name)
         {
             Match m = Regex.Match(name, @"\b(\d)\d{3}(WX|X)\b");
@@ -211,10 +236,10 @@ namespace ChipsetUpdater
             switch (series)
             {
                 case '1':
-                case '2': hw.Socket = "TR4"; hw.Chipset = "X399"; break;
-                case '3': hw.Socket = wx ? "sWRX8" : "sTRX4"; hw.Chipset = wx ? "WRX80" : "TRX40"; break;
-                case '5': hw.Socket = "sWRX8"; hw.Chipset = "WRX80"; break;
-                default: hw.Socket = "sTR5"; hw.Chipset = wx ? "WRX90" : "TRX50"; break;
+                case '2': hw.DetectedSocket = "TR4"; hw.DetectedChipset = "X399"; break;
+                case '3': hw.DetectedSocket = wx ? "sWRX8" : "sTRX4"; hw.DetectedChipset = wx ? "WRX80" : "TRX40"; break;
+                case '5': hw.DetectedSocket = "sWRX8"; hw.DetectedChipset = "WRX80"; break;
+                default: hw.DetectedSocket = "sTR5"; hw.DetectedChipset = wx ? "WRX90" : "TRX50"; break;
             }
         }
 

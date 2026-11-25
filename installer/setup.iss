@@ -48,18 +48,29 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; \
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Self-update: the app runs this setup with /SILENT /RELAUNCH=1 and closes; reopen it afterwards.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: ShouldRelaunch
 
 [Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  { Unticking the option on reinstall/upgrade also removes an existing startup entry. }
-  if (CurStep = ssPostInstall) and not WizardIsTaskSelected('autostart') then
+  { Unticking the option in the wizard also removes an existing startup entry.
+    Silent self-updates keep whatever the user set in the app. }
+  if (CurStep = ssPostInstall) and (not WizardSilent) and (not WizardIsTaskSelected('autostart')) then
     RegDeleteValue(HKCU, '{#RunKey}', '{#RunValue}');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  { The app itself can also create the entry, so always remove it on uninstall. }
+  { The app itself can also create the entry, so always remove it on uninstall, with the settings. }
   if CurUninstallStep = usPostUninstall then
+  begin
     RegDeleteValue(HKCU, '{#RunKey}', '{#RunValue}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\AMDChipsetUpdater');
+  end;
 end;

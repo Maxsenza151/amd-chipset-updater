@@ -7,8 +7,13 @@
 #   powershell -ExecutionPolicy Bypass -File build.ps1
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.0.0'
 $root = $PSScriptRoot
+
+# Version comes from src\AssemblyInfo.cs (e.g. 1.1.0.0 -> 1.1.0)
+$m = Select-String -Path (Join-Path $root 'src\AssemblyInfo.cs') -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)'
+if (-not $m) { throw "AssemblyVersion not found in src\AssemblyInfo.cs" }
+$Version = $m.Matches[0].Groups[1].Value
+Write-Host "Version $Version"
 $dist = Join-Path $root 'dist'
 $exe = Join-Path $dist 'AMDChipsetUpdater.exe'
 
@@ -25,6 +30,7 @@ $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object {
 & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/out:$exe" "/win32icon:$ico" `
     "/win32manifest:$(Join-Path $root 'src\app.manifest')" `
     /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Management.dll `
+    /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     $sources
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed" }
 Write-Host "Built $exe"

@@ -5,6 +5,8 @@ Small Windows app that installs and updates AMD chipset drivers straight from am
 | Up to date | Update available |
 |---|---|
 | ![Updated](docs/screenshots/updated.png) | ![Update available](docs/screenshots/update-available.png) |
+| **Platform chosen manually** | **New app version popup** |
+| ![Manual platform](docs/screenshots/manual-platform.png) | ![App update](docs/screenshots/app-update.png) |
 
 ## Download
 
@@ -23,6 +25,9 @@ SmartScreen may warn on first launch ("More info" → "Run anyway").
 1. **Detection** – reads the CPU (WMI `Win32_Processor`, family/model) to find the socket
    (AM4, AM5, sTR5, sWRX8, sTRX4, TR4, or notebook), then reads the chipset from the
    motherboard name (`Win32_BaseBoard`, e.g. "ROG STRIX B550-F" → B550).
+   If the chipset is not detected, or the detection is wrong, pick socket and chipset from the
+   **Platform** drop-downs. The choice is saved (`HKCU\Software\AMDChipsetUpdater`), also used by the
+   startup check, and **Reset to auto** goes back to automatic detection.
 2. **Latest version** – opens the matching page
    `amd.com/en/support/downloads/drivers.html/chipsets/<socket>/<chipset>.html` and takes the
    `amd_chipset_software_<version>.exe` link. Falls back to the socket's default page.
@@ -31,6 +36,19 @@ SmartScreen may warn on first launch ("More info" → "Run anyway").
 5. **Install / Update** – downloads with the `Referer: https://www.amd.com/` header (required by
    AMD), checks the Authenticode signature is valid and from *Advanced Micro Devices*,
    then runs the installer elevated (UAC).
+
+## App updates
+
+When the window opens, the app reads the latest release of this repository from the GitHub API.
+If it is newer, a popup offers **Update now**, **Later** or **Skip this version**, with a
+**See changelog** link to the release page.
+
+- **Installed copy**: downloads the new setup and runs it silently; it updates the files and reopens the app.
+- **Portable copy**: downloads the new zip, renames the running exe to `.old`, puts the new one in its
+  place and restarts (the `.old` file is removed on the next start).
+
+The downloaded file must match the SHA-256 checksum GitHub publishes for the release asset,
+otherwise it is deleted. The startup check (below) only looks for driver updates.
 
 ## Startup check
 
@@ -48,7 +66,8 @@ Needs only Windows' built-in C# compiler (.NET Framework 4.8). Inno Setup 6 is r
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-The portable zip and the installer are written to `dist\`.
+The portable zip and the installer are written to `dist\`. The version comes from `src\AssemblyInfo.cs`;
+publish a release with the tag `v<version>` and both files attached so existing copies can update.
 
 ## Source
 
@@ -57,6 +76,9 @@ The portable zip and the installer are written to `dist\`.
 - `src\InstalledDriver.cs` – installed version from the registry
 - `src\SignatureVerifier.cs` – Authenticode check (WinVerifyTrust)
 - `src\UpdateChecker.cs` – ties the above together
+- `src\Settings.cs` – manual platform and skipped app version
+- `src\AppUpdater.cs`, `src\AppUpdateDialog.cs` – app self-update from GitHub releases
+- `src\Http.cs` – shared download code
 - `src\MainForm.cs` – UI
 - `src\BackgroundCheck.cs` – `--check` mode and notification
 - `src\Autostart.cs` – startup entry

@@ -15,9 +15,12 @@ namespace ChipsetUpdater
         static readonly Color Red = Color.FromArgb(190, 30, 45);
         static readonly Color Muted = Color.FromArgb(96, 104, 112);
 
+        const string IntegratedChipset = "Integrated";
+
         readonly float scale;
-        readonly Label lblCpu, lblBoard, lblPlatform, lblInstalled, lblLatest, lblStatus, lblMessage, lblNote;
-        readonly LinkLabel lnkPage;
+        readonly Label lblCpu, lblBoard, lblPlatformMode, lblInstalled, lblLatest, lblStatus, lblMessage, lblNote;
+        readonly ComboBox cmbSocket, cmbChipset;
+        readonly LinkLabel lnkPage, lnkResetPlatform;
         readonly Button btnCheck, btnInstall;
         readonly CheckBox chkAutostart;
         readonly ProgressBar progress;
@@ -44,27 +47,32 @@ namespace ChipsetUpdater
             root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(400)));
 
-            var title = new Label
+            AddWide(root, new Label
             {
                 Text = Program.AppName,
                 Font = new Font("Segoe UI Semibold", 15f),
                 AutoSize = true,
                 Margin = new Padding(0, 0, 0, S(2)),
-            };
-            AddWide(root, title);
+            });
             AddWide(root, MutedLabel("Finds the right AMD chipset driver for this PC and keeps it up to date."));
 
+            // --- System
             AddWide(root, Section("SYSTEM"));
             lblCpu = AddRow(root, "Processor");
             lblBoard = AddRow(root, "Motherboard");
-            lblPlatform = AddRow(root, "Platform");
-            lnkPage = new LinkLabel { AutoSize = true, Margin = ValueMargin(), Text = "—" };
-            lnkPage.LinkClicked += delegate { OpenUrl(lnkPage.Tag as string); };
-            AddRow(root, "Driver page", lnkPage);
 
+            cmbSocket = MakeCombo(S(84));
+            cmbChipset = MakeCombo(S(84));
+            lblPlatformMode = new Label { AutoSize = true, ForeColor = Muted, Margin = new Padding(S(6), S(4), 0, 0) };
+            lnkResetPlatform = new LinkLabel { Text = "Reset to auto", AutoSize = true, Margin = new Padding(S(6), S(4), 0, 0), Visible = false };
+            AddRow(root, "Platform", Flow(cmbSocket, cmbChipset, lblPlatformMode, lnkResetPlatform));
+
+            // --- Driver
             AddWide(root, Section("CHIPSET DRIVER"));
             lblInstalled = AddRow(root, "Installed version");
-            lblLatest = AddRow(root, "Latest version");
+            lblLatest = new Label { AutoSize = true, Margin = new Padding(0), Text = "…" };
+            lnkPage = new LinkLabel { AutoSize = true, Margin = new Padding(S(14), 0, 0, 0), Text = "Open on amd.com", Visible = false };
+            AddRow(root, "Latest version", Flow(lblLatest, lnkPage));
             lblStatus = AddRow(root, "Status");
             lblStatus.Font = new Font("Segoe UI Semibold", 10.5f);
 
@@ -83,6 +91,7 @@ namespace ChipsetUpdater
             lblNote.Visible = false;
             AddWide(root, lblNote);
 
+            // --- Bottom bar
             var bottom = new TableLayoutPanel
             {
                 AutoSize = true,
@@ -108,7 +117,8 @@ namespace ChipsetUpdater
             bottom.Controls.Add(btnInstall, 2, 0);
             AddWide(root, bottom);
 
-            var footer = MutedLabel("Unofficial tool, not affiliated with AMD. Drivers are downloaded from amd.com.");
+            var footer = MutedLabel("Version " + VersionUtil.Short(AppUpdater.CurrentVersion)
+                                    + "  ·  Unofficial tool, not affiliated with AMD. Drivers are downloaded from amd.com.");
             footer.Font = new Font("Segoe UI", 8f);
             footer.Margin = new Padding(0, S(12), 0, 0);
             AddWide(root, footer);
@@ -122,15 +132,25 @@ namespace ChipsetUpdater
                 chkAutostart.Checked = Autostart.IsEnabled();
             }
             catch (Exception) { }
+
             chkAutostart.CheckedChanged += OnAutostartChanged;
             btnCheck.Click += delegate { RunCheck(); };
             btnInstall.Click += delegate { RunInstall(); };
+            lnkPage.LinkClicked += delegate { OpenUrl(lnkPage.Tag as string); };
+            cmbSocket.SelectionChangeCommitted += OnSocketChosen;
+            cmbChipset.SelectionChangeCommitted += OnChipsetChosen;
+            lnkResetPlatform.LinkClicked += delegate
+            {
+                Settings.ClearManualPlatform();
+                RunCheck();
+            };
         }
 
-        protected override void OnShown(EventArgs e)
+        protected override async void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            RunCheck();
+            await RunCheckAsync();
+            await CheckForAppUpdateAsync();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -148,6 +168,11 @@ namespace ChipsetUpdater
 
         async void RunCheck()
         {
+            await RunCheckAsync();
+        }
+
+        async Task RunCheckAsync()
+        {
             if (busy) return;
             SetBusy(true, "Checking your hardware and amd.com…", true);
             lblStatus.Text = "Checking…";
@@ -155,12 +180,12 @@ namespace ChipsetUpdater
             try
             {
                 result = await Task.Run(() => UpdateChecker.Check());
-                ShowResult(result);
             }
             finally
             {
                 SetBusy(false, null, false);
             }
+            ShowResult(result);
         }
 
         void ShowResult(CheckResult r)
@@ -168,33 +193,22 @@ namespace ChipsetUpdater
             HardwareInfo hw = r.Hardware;
             lblCpu.Text = hw != null && hw.CpuName != null ? hw.CpuName : "Unknown";
             lblBoard.Text = hw != null ? hw.BoardText : "Unknown";
-            lblPlatform.Text = hw != null ? hw.PlatformText : "Unknown";
+            ShowPlatform(hw);
 
             string page = r.Latest != null ? r.Latest.PageUrl : (hw != null ? hw.DriverPageUrl : null);
             lnkPage.Tag = page;
-            lnkPage.Text = page != null ? "Open on amd.com" : "—";
-            lnkPage.LinkArea = page != null ? new LinkArea(0, lnkPage.Text.Length) : new LinkArea(0, 0);
+            lnkPage.Visible = page != null;
 
             lblInstalled.Text = r.Installed != null ? r.Installed.VersionText : "Not installed";
             lblLatest.Text = r.Latest != null ? r.Latest.VersionText : "—";
 
             switch (r.Status)
             {
-                case UpdateStatus.UpToDate:
-                    SetStatus("Updated", Green, "Reinstall");
-                    break;
-                case UpdateStatus.UpdateAvailable:
-                    SetStatus("Update available", Orange, "Update");
-                    break;
-                case UpdateStatus.NotInstalled:
-                    SetStatus("Not installed", Orange, "Install");
-                    break;
-                case UpdateStatus.Unsupported:
-                    SetStatus("Not supported", Muted, "Install");
-                    break;
-                default:
-                    SetStatus("Check failed", Red, "Install");
-                    break;
+                case UpdateStatus.UpToDate: SetStatus("Updated", Green, "Reinstall"); break;
+                case UpdateStatus.UpdateAvailable: SetStatus("Update available", Orange, "Update"); break;
+                case UpdateStatus.NotInstalled: SetStatus("Not installed", Orange, "Install"); break;
+                case UpdateStatus.Unsupported: SetStatus("Not supported", Muted, "Install"); break;
+                default: SetStatus("Check failed", Red, "Install"); break;
             }
             lblMessage.Text = r.Message ?? "";
             lblMessage.ForeColor = r.Status == UpdateStatus.Error ? Red : ForeColor;
@@ -202,6 +216,7 @@ namespace ChipsetUpdater
             bool hasNote = hw != null && !string.IsNullOrEmpty(hw.Note);
             lblNote.Text = hasNote ? hw.Note : "";
             lblNote.Visible = hasNote;
+            UpdateEnabledState();
         }
 
         void SetStatus(string text, Color color, string buttonText)
@@ -211,7 +226,84 @@ namespace ChipsetUpdater
             btnInstall.Text = buttonText;
         }
 
-        // -------------------------------------------------------------- install
+        // ------------------------------------------------------------- platform
+
+        void ShowPlatform(HardwareInfo hw)
+        {
+            cmbSocket.Items.Clear();
+            cmbChipset.Items.Clear();
+            lnkResetPlatform.Visible = false;
+
+            if (hw == null || !hw.IsSupported)
+            {
+                lblPlatformMode.Text = hw == null ? "" : "Not supported";
+                lblPlatformMode.ForeColor = Muted;
+                return;
+            }
+
+            cmbSocket.Items.AddRange(AmdPlatforms.Sockets);
+            cmbSocket.SelectedItem = hw.Socket;
+            FillChipsets(hw.Socket, hw.Chipset);
+
+            if (!hw.ChipsetKnown)
+            {
+                lblPlatformMode.Text = "Not detected, please select";
+                lblPlatformMode.ForeColor = Orange;
+            }
+            else
+            {
+                lblPlatformMode.Text = hw.IsManual ? "(manual)" : "(auto)";
+                lblPlatformMode.ForeColor = Muted;
+            }
+            lnkResetPlatform.Visible = hw.IsManual;
+        }
+
+        void FillChipsets(string socket, string selected)
+        {
+            cmbChipset.Items.Clear();
+            string[] chipsets = AmdPlatforms.ChipsetsFor(socket);
+            if (chipsets.Length == 0)
+            {
+                cmbChipset.Items.Add(IntegratedChipset);
+                cmbChipset.SelectedIndex = 0;
+                return;
+            }
+            cmbChipset.Items.AddRange(chipsets);
+            if (selected != null) cmbChipset.SelectedItem = selected;
+        }
+
+        void OnSocketChosen(object sender, EventArgs e)
+        {
+            SaveManualPlatform(cmbSocket.SelectedItem as string, null);
+        }
+
+        void OnChipsetChosen(object sender, EventArgs e)
+        {
+            string chipset = cmbChipset.SelectedItem as string;
+            SaveManualPlatform(cmbSocket.SelectedItem as string, chipset == IntegratedChipset ? null : chipset);
+        }
+
+        /// <summary>Saves the user's choice (or goes back to auto if it equals the detection) and checks again.</summary>
+        void SaveManualPlatform(string socket, string chipset)
+        {
+            HardwareInfo hw = result != null ? result.Hardware : null;
+            if (socket == null || hw == null) return;
+            try
+            {
+                if (socket == hw.DetectedSocket && chipset == hw.DetectedChipset)
+                    Settings.ClearManualPlatform();
+                else
+                    Settings.SetManualPlatform(socket, chipset);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the platform: " + ex.Message, Program.AppName,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            RunCheck();
+        }
+
+        // ------------------------------------------------------- driver install
 
         async void RunInstall()
         {
@@ -224,27 +316,24 @@ namespace ChipsetUpdater
                 return;
 
             SetBusy(true, "Downloading " + release.FileName + "…", false);
-            string message = null;
+            string message;
             bool failed = false;
-            string path = null;
             try
             {
                 var report = new Progress<DownloadProgress>(OnDownloadProgress);
-                path = await Task.Run(() => AmdDriverSource.Download(release, report));
+                string path = await Task.Run(() => AmdDriverSource.Download(release, report));
 
                 lblMessage.Text = "Verifying the digital signature…";
                 progress.Style = ProgressBarStyle.Marquee;
-                string downloaded = path;
                 bool trusted = await Task.Run(() =>
                 {
                     string signer;
-                    return SignatureVerifier.IsSignedByAmd(downloaded, out signer);
+                    return SignatureVerifier.IsSignedByAmd(path, out signer);
                 });
                 if (!trusted)
                 {
                     TryDelete(path);
-                    throw new InvalidDataException(
-                        "The downloaded file is not signed by AMD, so it was deleted and not run.");
+                    throw new InvalidDataException("The downloaded file is not signed by AMD, so it was deleted and not run.");
                 }
 
                 lblMessage.Text = "Waiting for the AMD installer to finish…";
@@ -276,26 +365,9 @@ namespace ChipsetUpdater
                 SetBusy(false, null, false);
             }
 
-            RunCheckAfterInstall(message, failed);
-        }
-
-        async void RunCheckAfterInstall(string message, bool failed)
-        {
-            SetBusy(true, "Checking the installed version…", true);
-            try
-            {
-                result = await Task.Run(() => UpdateChecker.Check());
-                ShowResult(result);
-            }
-            finally
-            {
-                SetBusy(false, null, false);
-            }
-            if (message != null)
-            {
-                lblMessage.Text = message + (failed ? "" : "\n" + (result.Message ?? ""));
-                lblMessage.ForeColor = failed ? Red : ForeColor;
-            }
+            await RunCheckAsync();
+            lblMessage.Text = message + (failed ? "" : "\n" + (result.Message ?? ""));
+            lblMessage.ForeColor = failed ? Red : ForeColor;
         }
 
         void OnDownloadProgress(DownloadProgress p)
@@ -310,6 +382,65 @@ namespace ChipsetUpdater
             else
             {
                 lblMessage.Text = "Downloading… " + done + " MB";
+            }
+        }
+
+        // ----------------------------------------------------------- app update
+
+        async Task CheckForAppUpdateAsync()
+        {
+            string exe = Application.ExecutablePath;
+            bool installed = AppUpdater.IsInstalledCopy(exe);
+            AppRelease release;
+            try
+            {
+                release = await Task.Run(() => AppUpdater.GetLatest(installed));
+            }
+            catch (Exception)
+            {
+                return; // offline or GitHub unavailable: try again next time
+            }
+            if (release == null || release.Version <= AppUpdater.CurrentVersion) return;
+            if (release.VersionText == Settings.SkippedAppVersion) return;
+
+            AppUpdateChoice choice;
+            using (var dialog = new AppUpdateDialog(release, AppUpdater.CurrentVersion))
+            {
+                dialog.ShowDialog(this);
+                choice = dialog.Choice;
+            }
+
+            if (choice == AppUpdateChoice.Skip)
+            {
+                try { Settings.SkippedAppVersion = release.VersionText; } catch (Exception) { }
+            }
+            else if (choice == AppUpdateChoice.UpdateNow)
+            {
+                await InstallAppUpdateAsync(release, exe, installed);
+            }
+        }
+
+        async Task InstallAppUpdateAsync(AppRelease release, string exe, bool installed)
+        {
+            if (busy) return;
+            SetBusy(true, "Downloading " + Program.AppName + " " + release.VersionText + "…", false);
+            try
+            {
+                var report = new Progress<DownloadProgress>(OnDownloadProgress);
+                ProcessStartInfo next = await Task.Run(() => AppUpdater.Prepare(release, exe, installed, report));
+                if (installed) Program.ReleaseRunningMutex();
+                Process.Start(next);
+                busy = false;
+                Close(); // the installer / new exe takes over
+            }
+            catch (Exception ex)
+            {
+                SetBusy(false, null, false);
+                if (result != null) ShowResult(result);
+                if (MessageBox.Show(this, "The update could not be installed: " + ex.Message
+                                          + "\n\nOpen the download page instead?", Program.AppName,
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                    OpenUrl(release.PageUrl);
             }
         }
 
@@ -336,9 +467,6 @@ namespace ChipsetUpdater
         void SetBusy(bool isBusy, string message, bool marquee)
         {
             busy = isBusy;
-            btnCheck.Enabled = !isBusy;
-            btnInstall.Enabled = !isBusy && result != null && result.Latest != null
-                                 && result.Status != UpdateStatus.Unsupported;
             progress.Visible = isBusy;
             if (isBusy)
             {
@@ -347,7 +475,18 @@ namespace ChipsetUpdater
                 lblMessage.Text = message;
                 lblMessage.ForeColor = ForeColor;
             }
-            UseWaitCursor = false;
+            UpdateEnabledState();
+        }
+
+        void UpdateEnabledState()
+        {
+            bool supported = result != null && result.Hardware != null && result.Hardware.IsSupported;
+            btnCheck.Enabled = !busy;
+            btnInstall.Enabled = !busy && supported && result.Latest != null;
+            cmbSocket.Enabled = !busy && supported;
+            cmbChipset.Enabled = !busy && supported
+                                 && AmdPlatforms.ChipsetsFor(cmbSocket.SelectedItem as string).Length > 0;
+            lnkResetPlatform.Enabled = !busy;
         }
 
         static void TryDelete(string path)
@@ -383,6 +522,30 @@ namespace ChipsetUpdater
             };
         }
 
+        ComboBox MakeCombo(int width)
+        {
+            return new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = width,
+                Margin = new Padding(0, 0, S(6), 0),
+                Enabled = false,
+            };
+        }
+
+        FlowLayoutPanel Flow(params Control[] controls)
+        {
+            var panel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                WrapContents = false,
+                Margin = ValueMargin(),
+                Padding = new Padding(0),
+            };
+            panel.Controls.AddRange(controls);
+            return panel;
+        }
+
         Button MakeButton(string text)
         {
             return new Button
@@ -405,7 +568,10 @@ namespace ChipsetUpdater
         void AddRow(TableLayoutPanel t, string caption, Control value)
         {
             int row = t.RowCount++;
-            t.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = Muted, Margin = new Padding(0, S(3), 0, S(3)) }, 0, row);
+            var label = new Label { Text = caption, AutoSize = true, ForeColor = Muted, Margin = new Padding(0, S(3), 0, S(3)) };
+            if (value is FlowLayoutPanel && ((FlowLayoutPanel)value).Controls[0] is ComboBox)
+                label.Margin = new Padding(0, S(7), 0, S(3)); // align with the combo text
+            t.Controls.Add(label, 0, row);
             t.Controls.Add(value, 1, row);
         }
 
