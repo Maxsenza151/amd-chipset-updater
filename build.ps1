@@ -14,6 +14,12 @@ $m = Select-String -Path (Join-Path $root 'src\AssemblyInfo.cs') -Pattern 'Assem
 if (-not $m) { throw "AssemblyVersion not found in src\AssemblyInfo.cs" }
 $Version = $m.Matches[0].Groups[1].Value
 Write-Host "Version $Version"
+# A release tag that already exists means the version was not bumped: copies would loop on updates.
+$tagExists = $false
+try { $tagExists = [bool](git -C $root tag --list "v$Version" 2>$null) } catch { } # no git, or not a git checkout
+if ($tagExists) {
+    Write-Warning "Tag v$Version already exists. Bump AssemblyVersion in src\AssemblyInfo.cs before publishing a new release."
+}
 $dist = Join-Path $root 'dist'
 $exe = Join-Path $dist 'AMDChipsetUpdater.exe'
 

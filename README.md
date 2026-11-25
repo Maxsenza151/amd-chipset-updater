@@ -28,6 +28,7 @@ SmartScreen may warn on first launch ("More info" → "Run anyway").
    If the chipset is not detected, or the detection is wrong, pick socket and chipset from the
    **Platform** drop-downs. The choice is saved (`HKCU\Software\AMDChipsetUpdater`), also used by the
    startup check, and **Reset to auto** goes back to automatic detection.
+   Non-AMD processors, EPYC servers and AMD processors older than Ryzen are shown as not supported.
 2. **Latest version** – opens the matching page
    `amd.com/en/support/downloads/drivers.html/chipsets/<socket>/<chipset>.html` and takes the
    `amd_chipset_software_<version>.exe` link. Falls back to the socket's default page.
@@ -43,7 +44,9 @@ When the window opens, the app reads the latest release of this repository from 
 If it is newer, a popup offers **Update now**, **Later** or **Skip this version**, with a
 **See changelog** link to the release page.
 
-- **Installed copy**: downloads the new setup and runs it silently; it updates the files and reopens the app.
+- **Installed copy**: downloads the new setup and runs it silently; it updates the files and reopens the app,
+  keeping the "Check for updates when Windows starts" setting as it is. A running startup check is closed
+  first; if another window of the app is open, you are asked to close it.
 - **Portable copy**: downloads the new zip, renames the running exe to `.old`, puts the new one in its
   place and restarts (the `.old` file is removed on the next start).
 
@@ -54,7 +57,7 @@ otherwise it is deleted. The startup check (below) only looks for driver updates
 
 `AMDChipsetUpdater.exe --check` (registered in `HKCU\...\Run` by the checkbox or the installer):
 no window, below-normal priority, retries up to 3× if the network isn't ready, shows a Windows
-notification only if an update is available, then exits.
+notification only if an update is available or the driver is not installed, then exits.
 Exit codes: `0` up to date, `1` notified, `2` error. `--check --force-notify` always notifies (testing).
 
 ## Build

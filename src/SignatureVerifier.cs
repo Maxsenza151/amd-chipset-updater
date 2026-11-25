@@ -1,27 +1,36 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.RegularExpressions;
 
 namespace ChipsetUpdater
 {
     /// <summary>Checks that a downloaded file has a valid Authenticode signature from AMD.</summary>
     static class SignatureVerifier
     {
+        // Exact signer names (certificate CN) AMD signs its installers with.
+        static readonly string[] AmdSignerNames =
+        {
+            "Advanced Micro Devices", "Advanced Micro Devices, Inc.", "Advanced Micro Devices Inc.",
+        };
+
         public static bool IsSignedByAmd(string path, out string signer)
         {
             signer = null;
             if (!HasValidSignature(path)) return false;
+            string commonName;
             try
             {
-                X509Certificate cert = X509Certificate.CreateFromSignedFile(path);
+                var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
                 signer = cert.Subject;
+                commonName = cert.GetNameInfo(X509NameType.SimpleName, false);
             }
             catch (Exception)
             {
                 return false;
             }
-            return Regex.IsMatch(signer, @"(^|,\s*)(CN|O)=""?Advanced Micro Devices", RegexOptions.IgnoreCase);
+            foreach (string name in AmdSignerNames)
+                if (string.Equals(commonName, name, StringComparison.Ordinal)) return true;
+            return false;
         }
 
         static readonly Guid GenericVerifyV2 = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");

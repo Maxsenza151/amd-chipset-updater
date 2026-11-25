@@ -62,28 +62,33 @@ namespace ChipsetUpdater
                     Version = v,
                     VersionText = m.Groups[2].Value,
                     FileName = m.Groups[1].Value,
-                    DownloadUrl = m.Value,
+                    DownloadUrl = "https://" + m.Value.Substring(m.Value.IndexOf("://", StringComparison.Ordinal) + 3),
                     PageUrl = pageUrl,
                 };
             }
             return best;
         }
 
-        /// <summary>Downloads the installer to %TEMP%\AMDChipsetUpdater and returns its path.</summary>
+        /// <summary>
+        /// Downloads the installer into a new folder %TEMP%\AMDChipsetUpdater\&lt;random&gt; and returns its path
+        /// (a fresh folder each time, so nothing can be planted next to it in advance).
+        /// </summary>
         public static string Download(DriverRelease release, IProgress<DownloadProgress> progress)
         {
-            string dir = Path.Combine(Path.GetTempPath(), "AMDChipsetUpdater");
-            Directory.CreateDirectory(dir);
+            string dir = Directory.CreateDirectory(Path.Combine(AppUpdater.DownloadRoot, Guid.NewGuid().ToString("N"))).FullName;
             string dest = Path.Combine(dir, release.FileName);
-
-            Http.DownloadFile(release.DownloadUrl, dest, Referer, null, progress);
-
-            if (!LooksLikeExe(dest))
+            try
             {
-                File.Delete(dest);
-                throw new InvalidDataException("The downloaded file is not a Windows program.");
+                Http.DownloadFile(release.DownloadUrl, dest, Referer, null, progress);
+                if (!LooksLikeExe(dest))
+                    throw new InvalidDataException("The downloaded file is not a Windows program.");
+                return dest;
             }
-            return dest;
+            catch
+            {
+                try { Directory.Delete(dir, true); } catch (Exception) { }
+                throw;
+            }
         }
 
         static bool LooksLikeExe(string path)

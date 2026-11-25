@@ -43,25 +43,31 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
+; Not during a self-update: the previous task choice would be re-applied and undo the app's checkbox.
 Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; \
-    ValueData: """{app}\{#AppExe}"" --check"; Flags: uninsdeletevalue; Tasks: autostart
+    ValueData: """{app}\{#AppExe}"" --check"; Flags: uninsdeletevalue; Tasks: autostart; Check: not IsSelfUpdate
+
+[UninstallDelete]
+; Leftover downloads (normally removed by the app itself)
+Type: filesandordirs; Name: "{%TEMP}\AMDChipsetUpdater"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 ; Self-update: the app runs this setup with /SILENT /RELAUNCH=1 and closes; reopen it afterwards.
-Filename: "{app}\{#AppExe}"; Flags: nowait; Check: ShouldRelaunch
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: IsSelfUpdate
 
 [Code]
-function ShouldRelaunch: Boolean;
+{ True when the app started this setup to update itself (it passes /RELAUNCH=1). }
+function IsSelfUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  { Unticking the option in the wizard also removes an existing startup entry.
-    Silent self-updates keep whatever the user set in the app. }
-  if (CurStep = ssPostInstall) and (not WizardSilent) and (not WizardIsTaskSelected('autostart')) then
+  { Unticking the option also removes an existing startup entry.
+    Self-updates leave the startup entry exactly as the user set it in the app. }
+  if (CurStep = ssPostInstall) and (not IsSelfUpdate) and (not WizardIsTaskSelected('autostart')) then
     RegDeleteValue(HKCU, '{#RunKey}', '{#RunValue}');
 end;
 

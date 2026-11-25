@@ -113,8 +113,7 @@ namespace ChipsetUpdater
             if (release.Sha256 == null)
                 throw new InvalidDataException("GitHub did not publish a checksum for the file, so it cannot be verified.");
 
-            string dir = Path.Combine(Path.GetTempPath(), "AMDChipsetUpdater");
-            Directory.CreateDirectory(dir);
+            string dir = Directory.CreateDirectory(Path.Combine(DownloadRoot, Guid.NewGuid().ToString("N"))).FullName;
             string file = Path.Combine(dir, Path.GetFileName(release.AssetName));
             Http.DownloadFile(release.AssetUrl, file, null, UserAgent, progress);
 
@@ -163,26 +162,67 @@ namespace ChipsetUpdater
             }
         }
 
-        /// <summary>Removes the leftovers of a portable update (the old exe may still be closing).</summary>
-        public static void CleanupAfterUpdate(string exePath)
+        /// <summary>
+        /// Before a self-update through the installer: other running copies of this exe keep the installer's
+        /// AppMutex, which makes a silent setup give up. Background startup checks (no window) are closed;
+        /// returns how many other copies have a window open (the user must close those).
+        /// </summary>
+        public static int CloseOtherInstances(string exePath)
         {
-            string[] leftovers = { exePath + ".old", exePath + ".new" };
-            if (!File.Exists(leftovers[0]) && !File.Exists(leftovers[1])) return;
+            int withWindow = 0;
+            int self = Process.GetCurrentProcess().Id;
+            foreach (Process p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exePath)))
+            {
+                using (p)
+                {
+                    try
+                    {
+                        if (p.Id == self) continue;
+                        if (!string.Equals(p.MainModule.FileName, exePath, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (p.MainWindowHandle != IntPtr.Zero) { withWindow++; continue; }
+                        p.Kill();
+                        p.WaitForExit(3000);
+                    }
+                    catch (Exception) { } // exited meanwhile, or not ours to inspect
+                }
+            }
+            return withWindow;
+        }
 
+        /// <summary>
+        /// Removes leftovers in the background: the old exe of a portable update (it may still be closing)
+        /// and downloads in %TEMP%\AMDChipsetUpdater (a self-update setup may still be finishing).
+        /// </summary>
+        public static void CleanupLeftovers(string exePath)
+        {
+            string tempDir = DownloadRoot;
             Task.Run(() =>
             {
                 for (int attempt = 0; attempt < 20; attempt++)
                 {
-                    bool done = true;
-                    foreach (string f in leftovers)
-                    {
-                        try { if (File.Exists(f)) File.Delete(f); }
-                        catch (Exception) { done = false; }
-                    }
+                    bool done = TryDelete(exePath + ".old") & TryDelete(exePath + ".new") & TryDeleteDirectory(tempDir);
                     if (done) return;
                     Thread.Sleep(500);
                 }
             });
+        }
+
+        /// <summary>%TEMP%\AMDChipsetUpdater: where downloads go (removed again on the next start).</summary>
+        public static string DownloadRoot
+        {
+            get { return Path.Combine(Path.GetTempPath(), "AMDChipsetUpdater"); }
+        }
+
+        static bool TryDelete(string file)
+        {
+            try { if (File.Exists(file)) File.Delete(file); return true; }
+            catch (Exception) { return false; }
+        }
+
+        static bool TryDeleteDirectory(string dir)
+        {
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); return true; }
+            catch (Exception) { return false; }
         }
 
         static string Sha256Of(string path)

@@ -13,6 +13,11 @@ namespace ChipsetUpdater
         const string RunningMutexName = "AMDChipsetUpdater.Running";
         static Mutex runningMutex;
 
+        public static void AcquireRunningMutex()
+        {
+            if (runningMutex == null) runningMutex = new Mutex(false, RunningMutexName);
+        }
+
         /// <summary>Called right before starting a self-update installer, so it does not see this app as running.</summary>
         public static void ReleaseRunningMutex()
         {
@@ -32,13 +37,13 @@ namespace ChipsetUpdater
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-            runningMutex = new Mutex(false, RunningMutexName);
+            AcquireRunningMutex();
             try
             {
                 if (HasArg(args, "--check"))
                     return BackgroundCheck.Run(HasArg(args, "--force-notify"));
 
-                AppUpdater.CleanupAfterUpdate(Application.ExecutablePath);
+                AppUpdater.CleanupLeftovers(Application.ExecutablePath);
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new MainForm());

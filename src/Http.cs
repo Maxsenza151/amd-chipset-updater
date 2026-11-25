@@ -44,6 +44,23 @@ namespace ChipsetUpdater
                                         IProgress<DownloadProgress> progress)
         {
             string part = dest + ".part";
+            try
+            {
+                DownloadTo(url, part, referer, userAgent, progress);
+            }
+            catch
+            {
+                try { File.Delete(part); } catch (Exception) { }
+                throw;
+            }
+
+            if (File.Exists(dest)) File.Delete(dest);
+            File.Move(part, dest);
+        }
+
+        static void DownloadTo(string url, string part, string referer, string userAgent,
+                               IProgress<DownloadProgress> progress)
+        {
             HttpWebRequest req = CreateRequest(url, userAgent);
             req.Accept = "*/*";
             if (referer != null) req.Referer = referer;
@@ -74,9 +91,6 @@ namespace ChipsetUpdater
                         throw new IOException("The download was interrupted. Please try again.");
                 }
             }
-
-            if (File.Exists(dest)) File.Delete(dest);
-            File.Move(part, dest);
         }
     }
 }

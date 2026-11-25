@@ -26,7 +26,8 @@ namespace ChipsetUpdater
         readonly ProgressBar progress;
 
         CheckResult result;
-        bool busy;
+        bool busy;              // any operation running: buttons and drop-downs disabled
+        bool longOperation;     // a download or install: closing the window asks first
 
         public MainForm()
         {
@@ -141,7 +142,16 @@ namespace ChipsetUpdater
             cmbChipset.SelectionChangeCommitted += OnChipsetChosen;
             lnkResetPlatform.LinkClicked += delegate
             {
-                Settings.ClearManualPlatform();
+                try
+                {
+                    Settings.ClearManualPlatform();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Could not reset the platform: " + ex.Message, Program.AppName,
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 RunCheck();
             };
         }
@@ -149,13 +159,17 @@ namespace ChipsetUpdater
         protected override async void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            // The GitHub check runs alongside the driver check, so a slow amd.com does not delay the popup.
+            string exe = Application.ExecutablePath;
+            bool installed = AppUpdater.IsInstalledCopy(exe);
+            Task<AppRelease> appRelease = Task.Run(() => GetLatestAppRelease(installed));
             await RunCheckAsync();
-            await CheckForAppUpdateAsync();
+            await OfferAppUpdateAsync(await appRelease, exe, installed);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (busy && e.CloseReason == CloseReason.UserClosing &&
+            if (longOperation && e.CloseReason == CloseReason.UserClosing &&
                 MessageBox.Show(this, "An operation is still running. Close anyway?", Program.AppName,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
@@ -275,7 +289,9 @@ namespace ChipsetUpdater
 
         void OnSocketChosen(object sender, EventArgs e)
         {
-            SaveManualPlatform(cmbSocket.SelectedItem as string, null);
+            string socket = cmbSocket.SelectedItem as string;
+            if (result != null && result.Hardware != null && socket == result.Hardware.Socket) return; // same socket picked again
+            SaveManualPlatform(socket, null);
         }
 
         void OnChipsetChosen(object sender, EventArgs e)
@@ -317,33 +333,39 @@ namespace ChipsetUpdater
                 return;
 
             SetBusy(true, "Downloading " + release.FileName + "…", false);
+            longOperation = true;
             string message;
             bool failed = false;
+            string path = null;
             try
             {
                 var report = new Progress<DownloadProgress>(OnDownloadProgress);
-                string path = await Task.Run(() => AmdDriverSource.Download(release, report));
+                path = await Task.Run(() => AmdDriverSource.Download(release, report));
 
                 lblMessage.Text = "Verifying the digital signature…";
                 progress.Style = ProgressBarStyle.Marquee;
-                bool trusted = await Task.Run(() =>
+                Process installer;
+                // Keep the file locked against changes from the signature check until the installer has started,
+                // so nothing can swap it in between and get elevated in its place.
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
-                    string signer;
-                    return SignatureVerifier.IsSignedByAmd(path, out signer);
-                });
-                if (!trusted)
-                {
-                    TryDelete(path);
-                    throw new InvalidDataException("The downloaded file is not signed by AMD, so it was deleted and not run.");
-                }
+                    string verified = path;
+                    bool trusted = await Task.Run(() =>
+                    {
+                        string signer;
+                        return SignatureVerifier.IsSignedByAmd(verified, out signer);
+                    });
+                    if (!trusted)
+                        throw new InvalidDataException("The downloaded file is not signed by AMD, so it was deleted and not run.");
 
-                lblMessage.Text = "Waiting for the AMD installer to finish…";
-                Process installer = Process.Start(new ProcessStartInfo(path)
-                {
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WorkingDirectory = Path.GetDirectoryName(path),
-                });
+                    lblMessage.Text = "Waiting for the AMD installer to finish…";
+                    installer = Process.Start(new ProcessStartInfo(path)
+                    {
+                        UseShellExecute = true,
+                        Verb = "runas",
+                        WorkingDirectory = Path.GetDirectoryName(path),
+                    });
+                }
                 if (installer != null)
                     await Task.Run(() => installer.WaitForExit());
 
@@ -363,6 +385,8 @@ namespace ChipsetUpdater
             }
             finally
             {
+                if (path != null) TryDeleteDownload(path);
+                longOperation = false;
                 SetBusy(false, null, false);
             }
 
@@ -388,21 +412,20 @@ namespace ChipsetUpdater
 
         // ----------------------------------------------------------- app update
 
-        async Task CheckForAppUpdateAsync()
+        static AppRelease GetLatestAppRelease(bool installed)
         {
-            string exe = Application.ExecutablePath;
-            bool installed = AppUpdater.IsInstalledCopy(exe);
-            AppRelease release;
-            try
-            {
-                release = await Task.Run(() => AppUpdater.GetLatest(installed));
-            }
-            catch (Exception)
-            {
-                return; // offline or GitHub unavailable: try again next time
-            }
+            try { return AppUpdater.GetLatest(installed); }
+            catch (Exception) { return null; } // offline or GitHub unavailable: try again next time
+        }
+
+        async Task OfferAppUpdateAsync(AppRelease release, string exe, bool installed)
+        {
             if (release == null || release.Version <= AppUpdater.CurrentVersion) return;
             if (release.VersionText == Settings.SkippedAppVersion) return;
+
+            // Don't interrupt a driver download/install: offer the update once it is done.
+            while (busy && !IsDisposed) await Task.Delay(500);
+            if (IsDisposed) return;
 
             AppUpdateChoice choice;
             using (var dialog = new AppUpdateDialog(release, AppUpdater.CurrentVersion))
@@ -424,20 +447,50 @@ namespace ChipsetUpdater
         async Task InstallAppUpdateAsync(AppRelease release, string exe, bool installed)
         {
             if (busy) return;
+
+            // A silent setup gives up while another copy of the app is running (it holds the installer's AppMutex).
+            if (installed && AppUpdater.CloseOtherInstances(exe) > 0)
+            {
+                MessageBox.Show(this, "Another " + Program.AppName + " window is open. Close it, then click "
+                                      + "\"Update now\" again (reopen this window to see the offer).",
+                    Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             SetBusy(true, "Downloading " + Program.AppName + " " + release.VersionText + "…", false);
+            longOperation = true;
+            bool prepared = false;
             try
             {
                 var report = new Progress<DownloadProgress>(OnDownloadProgress);
                 ProcessStartInfo next = await Task.Run(() => AppUpdater.Prepare(release, exe, installed, report));
-                if (installed) Program.ReleaseRunningMutex();
+                prepared = true;
+                if (installed)
+                {
+                    AppUpdater.CloseOtherInstances(exe); // a startup check may have begun during the download
+                    Program.ReleaseRunningMutex();
+                }
                 Process.Start(next);
                 busy = false;
+                longOperation = false;
                 Close(); // the installer / new exe takes over
             }
             catch (Exception ex)
             {
+                Program.AcquireRunningMutex();
+                longOperation = false;
                 SetBusy(false, null, false);
                 if (result != null) ShowResult(result);
+
+                if (prepared && !installed)
+                {
+                    // The new exe is already in place; only the restart failed.
+                    MessageBox.Show(this, "Version " + release.VersionText + " was installed, but the app could not "
+                                          + "restart: " + ex.Message + "\n\nClose this window and open "
+                                          + Program.AppName + " again.",
+                        Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
                 if (MessageBox.Show(this, "The update could not be installed: " + ex.Message
                                           + "\n\nOpen the download page instead?", Program.AppName,
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
@@ -490,9 +543,10 @@ namespace ChipsetUpdater
             lnkResetPlatform.Enabled = !busy;
         }
 
-        static void TryDelete(string path)
+        /// <summary>Deletes a downloaded file and its per-download folder.</summary>
+        static void TryDeleteDownload(string path)
         {
-            try { File.Delete(path); } catch (Exception) { }
+            try { Directory.Delete(Path.GetDirectoryName(path), true); } catch (Exception) { }
         }
 
         static void OpenUrl(string url)

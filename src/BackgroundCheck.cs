@@ -28,7 +28,11 @@ namespace ChipsetUpdater
                 r = UpdateChecker.Check();
             }
 
-            bool hasUpdate = r.Status == UpdateStatus.UpdateAvailable || r.Status == UpdateStatus.NotInstalled;
+            // An installed version that cannot be read is shown in the window, but not notified at every logon
+            // (reinstalling would not change it).
+            bool versionUnreadable = r.Installed != null && r.Installed.Version == null;
+            bool hasUpdate = (r.Status == UpdateStatus.UpdateAvailable && !versionUnreadable)
+                             || r.Status == UpdateStatus.NotInstalled;
             if (!hasUpdate && !forceNotify)
                 return r.Status == UpdateStatus.Error ? 2 : 0;
 

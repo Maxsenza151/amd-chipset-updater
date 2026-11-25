@@ -188,6 +188,13 @@ namespace ChipsetUpdater
                 hw.UnsupportedReason = "AMD EPYC server platforms are not supported. Use your server vendor's drivers.";
                 return;
             }
+            if (hw.CpuFamily > 0 && hw.CpuFamily < 0x17)
+            {
+                // FX, A-series, Phenom, older Athlon (AM3+, FM2+, ...): not covered by AMD Chipset Software.
+                hw.UnsupportedReason = "This AMD processor predates Ryzen. AMD Chipset Software only supports "
+                                     + "Ryzen and Threadripper platforms.";
+                return;
+            }
 
             hw.IsSupported = true;
 
