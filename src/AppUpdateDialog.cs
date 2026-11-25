@@ -75,6 +75,7 @@ namespace ChipsetUpdater
             Controls.Add(root);
             AcceptButton = update;
             CancelButton = later;
+            ActiveControl = update; // otherwise the changelog link gets focus and Enter opens the browser
         }
 
         Button MakeButton(string text, AppUpdateChoice choice)
