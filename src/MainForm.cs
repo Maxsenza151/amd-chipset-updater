@@ -247,7 +247,8 @@ namespace ChipsetUpdater
 
             if (!hw.ChipsetKnown)
             {
-                lblPlatformMode.Text = "Not detected, please select";
+                // Shorter text when "Reset to auto" is shown too, so both fit on the row.
+                lblPlatformMode.Text = hw.IsManual ? "Select chipset" : "Not detected, please select";
                 lblPlatformMode.ForeColor = Orange;
             }
             else
